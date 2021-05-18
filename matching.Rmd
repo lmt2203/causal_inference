@@ -10,4 +10,32 @@ library(MatchIt)
 library(optmatch)
 ```
 
-#
+# `MatchIt`
+
+`MatchIt` provides a simple and straightforward interface to various methods of matching for covariate balance in observational studies. Several matching methods are available: nearest neighbor matching, optimal pair matching, optimal full matching, genetic matching, exact matching, subclassification,.... Here is an example of the use of `MatchIt` to perform full matching and assess balance
+
+```{r}
+data("lalonde")
+head(lalonde)
+
+# full matching on the PS
+m.out <- matchit(treat ~., data = lalonde, method = "full")
+
+m.out
+summary(m.out) #check covariate balance for the original and matched samples
+```
+
+* We have:
+   + balance for the original sample
+   + balance in the matched sample
+   + percent reduction in imbalance 
+   + sample size before and after matching
+Smaller values for the balance statistics indicate better balance.\
+
+We can plot the standardized mean differences in a Love plot for a visual display of balance across sample:
+
+```{r}
+# plot balance
+plot(summary(m.out))
+```
+
