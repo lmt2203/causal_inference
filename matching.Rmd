@@ -8,22 +8,84 @@ output: html_document
 ```{r setup, include=FALSE}
 library(MatchIt)
 library(optmatch)
+library(tidyverse)
 ```
 
 # `MatchIt`
 
-`MatchIt` provides a simple and straightforward interface to various methods of matching for covariate balance in observational studies. Several matching methods are available: nearest neighbor matching, optimal pair matching, optimal full matching, genetic matching, exact matching, subclassification,.... Here is an example of the use of `MatchIt` to perform full matching and assess balance
+`MatchIt` provides a simple and straightforward interface to various methods of matching for covariate balance in observational studies. Several matching methods are available: nearest neighbor matching, optimal pair matching, optimal full matching, genetic matching, exact matching, subclassification,.... After preprocessing with `MatchIt`, we can use whatever parametric model they would have used without `MatchIt` and produce inferences that are more robust and less sensitive to modeling assumptions. Here is an example of the use of `MatchIt` to perform full matching and assess balance. \
+
+Goal of matching is to produce *covariate balance*, that is, for the distributions of covariates in the 2 groups to be approximately equal to each other, as they would be in a randomized experiment. In perfectly balanced samples, a simple difference in means can be a valid treatment effect estimate. \
+
+
 
 ```{r}
 data("lalonde")
 head(lalonde)
 
-# full matching on the PS
-m.out <- matchit(treat ~., data = lalonde, method = "full")
-
-m.out
-summary(m.out) #check covariate balance for the original and matched samples
 ```
+
+`treat` is the treatment variable, `re78` is the outcome, and the others are pre-treatment variable. We are interested in the causal effect of the treatment (`treat`) on 1978 earnings (`re78`)
+
+```{r docs, include = FALSE}
+vignette("matching-methods")
+vignette("assessing-balance")
+vignette("estimating-effects")
+vignette("sampling-weights")
+```
+
+# Planning: 
+
+Select type of effect to be estimated, target population to which the treatment effect is to generalize, select the covariates for which balance is required for an unbiased estimate of the treatment effect. 
+
+### Select type of effect to be estimated
+Matching is well-suited for estimating total effects.
+  + Conditional effect = effect of treatment within some strata of other prognostic variable
+  + Marginal effect = average effect of a treatment in a population (e.g., for implementing a broad policy change)
+
+### Selecting target population 
+Target population = population to which the effect estimate is to generalize. Usually the target population is a group of units who are eligible for the treatment.
+
+### Selecting covariates to balance
+To estimate total causal effects, all covariates must be measured prior to treatment (or otherwise not be affected by the treatment)
+
+# Check initial imbalance
+
+`method` argument specifies the method of matching to be performed. `method` = NULL => assess balance prior to matching. `distance` specifies the method for estimating propensity score computed as the predicted probability of being the treated group given the covariates. 
+
+```{r}
+# Constructing a pre-match matchit object
+m.out0 <- matchit(treat ~ age + educ + race + married + nodegree + re74 + re75,
+                  data = lalonde,
+                  method = NULL, distance = "glm") #logistic regression 
+
+
+summary(m.out0)
+m.out0
+```
+
+We can see severe imbalances as measured by the standardized mean differences (Std. Mean diff), variance ratio (Var. Ratio) and empirical cumulative density function (eCDF) statistics. Ideally standardized mean differences and eCDF statistics close to 0, variance ratios close to 1 indicate good balance. Here many of them are far from their ideal values. 
+
+# Matching
+
+## 1:1 nearest neighbor (NN)
+One by one, each treated unit is paired with an available control unit that has the closest propensity score to it. Any remaining control units are left unmatched and excluded from further analysis
+
+```{r}
+# 1:1 NN PS matching w/o replacement
+m.out1 <- matchit(treat ~ age + educ + race + married + 
+                   nodegree + re74 + re75, data = lalonde,
+                 method = "nearest", distance = "glm")
+
+
+m.out1
+
+
+lalonde %>% 
+  group_by(treat) %>% 
+ summarize(n_obs = n())
+```
+
 
 * We have:
    + balance for the original sample
@@ -36,6 +98,46 @@ We can plot the standardized mean differences in a Love plot for a visual displa
 
 ```{r}
 # plot balance
-plot(summary(m.out))
+plot(summary(m.out1))
+```
+
+
+
+# Assessing the quality of matches
+
+Check for covariate balance, quality of match (how many units remain after matching).\
+
+If, after matching, the remaining sample size is small => resulting effect estimate might not be accurate. There will be a trade-off between balance and remaining sample size. \
+
+To assess quality of resulting matches, we can use `summary()` function. 
+
+```{r}
+summary(m.out1)
+```
+
+Although balance has improved for some covariates, in general balance is still quite poor, indicating that NN PSM is not sufficient for removing confounding in this dataset. The final column `Std.Pair Diff`displays the average absolute within-pair difference of each covariate. Small values indicate better balance.\
+
+Table of sample sizes before and after matching:244 unmatched control units. ideally, unmatched units would be far from treated units and would require greater extrapolation were they to have been retained. We can visualize the distribution of PS of those who were matched :
+
+```{r}
+plot(m.out1, type = "jitter", interactive = FALSE)
+```
+
+We cabn visually examine balance on the covariates using `plot()` with `type = "qq"`
+
+```{r}
+plot(m.out1, type = "qq", interactive = FALSE,
+     which.xs = c("age", "married", "re75"))
+
+plot(m.out1, )
+```
+
+Points are far from the solid diagonal line are the areas of the covariate distributions that differ between the treatment groups. Although `married` and `re75` appear to have improved balance after matching, the case is mixed for `age`.
+Ideally we want to see the points in the right column (matched) falling between the dotted lines. 
+
+# Trying a Different Matching Specification
+
+```{r}
+
 ```
 
