@@ -1,0 +1,235 @@
+---
+title: "Assessing balance"
+author: "Linh Tran"
+date: "5/20/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(MatchIt)
+library(optmatch)
+library(tidyverse)
+library("cobalt")
+```
+
+# Introduction
+
+When covariate balance is achieved, the resulting effect estimate is less sensitive to model misspecification and ideally close to the true treatment effect. In randomized experiment, covariate balance is achieved automatically, which is why unadjusted effects estimated from randomized trial data (in the absence of dropout) can be validly interpreted as causal effects. \
+
+When using matching to recover causal effect estimates form observational data, balance is not guaranteed and must be assessed. \
+
+* 3 main roles in causal effect estimation using matching
+  + as a target to optimize
+  + as a method of assessing quality of matches
+  + as evidence that the estimated effect is close to true effect
+
+# Recommendations for Balance Assessment
+
+Assessing balance involves assessing whether the distributions of covariates are similar between the treated and control groups. 
+
+* Common recommendations for assessing balance:
+  + Standardized mean difference (SMD) = the difference in the mean of each covariate between groups standardized by a standardization factor. The standardization factor is typically the standard deviation of the covariate in the treated group when targeting ATT or the pooled standard deviation across both groups when targeting ATE. SMD close to 0 indicate good balance. 
+  + Variance Ratios = ratio of the variance of a covariate in one group to the other. Variance ratio close to 1 indicate good balance because they imply the variances of the samples are similar.
+  + Empirical CDF Statistics: allow assessment of imbalance across the entire covariate distribution of that covariate rather than just its mean or variance. 
+  + Visual diagnostics: eCDF plots, empirical quantile-quantile (eQQ plots, kernel density plots etc
+  + Prognostic score = estimate of the potential outcome under control for each unit. 
+
+# Recomendations for Balance Reporting
+
+* Report SMDs before and after matching for each covariate, any prognostically important interactions between covariates, and the prognostic score. This can be reported in a table or in a Love plot.
+* Report summaries of balance for other statistics e.g., the largest mean and maximum eCDF difference among the covariates and the largest SMD among squares, cubes, and interactions of the covariates. 
+
+# Assessing Balance with `MatchIt`
+
+```{r}
+data("lalonde")
+
+m.out <- matchit(treat ~ age + educ + race + married + 
+                   nodegree + re74 + re75, data = lalonde,
+                 method = "full")
+m.out
+```
+
+## `summary.matchit()`
+
+```{r}
+summary(m.out)
+```
+
+* Additional arguments 
+   + `interactions`: default is FALSE, and setting to TRUE can make the output massive when many covariates are present, but it is important to ensure no important interactions remain imbalanced
+   + `addlvariables` allows for balance to be assessed on variables other than those inside the `matchit` object. 
+   + `standardize` controls whether standardized (SMD, eCDF stats) or unstandardized statistics (raw difference in means, eQQ plot statistics) are to displayed. The default is TRUE for standardized statistics, which are more common to report because they are all on the same scale regardless of the scale of the covariates. 
+   + `pair.dist` controls whether within-pair distances should be computed and displayed. The default is TRUE. With full matching, exact matching, coarsened exact matching, and propensity score subclassification, computing pair distances can take a long time, and so it may be beneficial to set to FALSE in these cases. 
+   + `un` and `improvement` control whether balance prior to matching should be displayed and whether the percent balance improvement after matching should be displayed. These can be set to FALSE to reduce the output. 
+   
+* Example of `addlvariables`: Request balance on the square of `age`, the variables representing whether `re74` and `re75` were equal to 0, and the interaction between `educ` and `race`
+
+```{r}
+summary(m.out, addlvariables = ~ I(age^2) + I(re74==0) + 
+          I(re75==0) + educ:race)
+```
+
+**Interpretation**
+* The first table (Summary of Balance for All Data) provides balance in the sample prior to matching. Setting `un = FALSE` would have suppressed this table.
+* The 2nd table (Summary of Balance for Matched Data) contains all the same statistics in the matched sample. 
+* The 3rd table (Percent Balance Improvement) contains the percent balance improvement for each covariate = 100(theta_match - theta_unmatched)/theta_unmatched. Values between 0 and 100 indicate that balance improved after matching as measured by the statistics; 
+* The SMDs are computed as the difference mean divided by a standardization factor computed in the **unmatched** sample. An absolute SMD close to 0 indicates good balance. THe recommendation cut off is 0.1 and less than 0.05 for potentially prognostically important variables. 
+* Variance ratios are computed as the ratio of the variance of the treated group to that of the control group for each covariate. Variance ratios are not computed for binary covariates because they are a function of the prevalence in each group, which is captured in the mean difference and eCDF statistics. A variance ratio close to 1 indicates good balance; commonly recommend between 0.5 and 2. 
+* eCDF statistics corresponds to the difference in the overall distributions of the covariates between treatment groups. eCDF close to 0 indicates better balance. 
+
+
+## `plot.summary.matchit()`
+
+A Love plot is a clean way to visually summarize balance. Using `plot` on the output of a call to `summary()` on a `matchit` object produces a Love plot of the SMD. \
+
+* Several additional arguments:
+  + `abs` controls whether SMD should be displayed in absolute value or not. Default is TRUE.
+  + `var.order` controls how the variables are ordered on the y-axis. The options are: `data` (default) which orders the variables as they appear in the `summary.matchit()` output, `unmatched`, `matched`, `alphabetical`. Using `unmatched` which orders the variables based on SMD before matching, tend to result in attractive plots and ensure the legend doesn't overlap with poitns in its default position.
+  + `threshold` controls where vertical lines indicating chosen thresholds should appear on the x-axis. The default is `c(0.1, 0.05) which display vertical lines at 0.1 and 0.05 SMD units. 
+
+```{r}
+m.sum <- summary(m.out, addlvariables = ~ I(age^2) + I(re74==0) + 
+          I(re75==0) + educ:race)
+plot(m.sum, var.order = "unmatched")
+```
+
+From this plot we could see that balance was quite poor prior to matching, but full matching iproved balanced on all covariates, and most within a threshold of 0.1. 
+
+## `plot.matchit()`
+
+* We can create eQQ plots or eCDF plots of the covariates and histograms or jitter plots of the propensity score. Both eQQ and eCDF plots can provide a summary of the balance of the full marginal distribution of a covariate beyond just the mean and variance. 
+* Arguments to customize output:
+  + `type`: `qq` for eQQ plots (default), `ecdf` for eCDF plots, `jitter` for jitter plots, `histogram` for histograms
+  + `interactive` controls whether the plot is interactive or not. For eQQ and eCDF plots, this allows us to control when the next page of covariates is to be displayed since only 3 can appear at a time. For jitter plots, this can allow us to select individual units with extreme values for further inspection. Default is TRUE. 
+  + `which.xs` is used to specify for which covariates to display balance in eQQ and eCDF plots. The default is to display balance on all, but we can request balance just on a specific subject. If 3 or fewer are requested, `interactive` is ignored. 
+  
+```{r}
+# qq plot
+plot(m.out, type = "qq", which.xs = c("age", "nodegree", "re74"))
+```
+
+* The y-axis display each value of the covariate for the treated units, and the x-axis display the value of the covariate at the corresponding quantile in the control group. When values fall on the 45 degree line, the groups are balanced.
+  + `age` remains somewhat imbalanced
+  + `nodegree` and `re74` have much better balance after matching than before. 
+  + the difference between the x and y values of each point are used to compute the eQQ difference statistics. 
+
+Below is eCDF plot
+
+```{r}
+# eCDF plot
+plot(m.out, type = "ecdf", which.xs = c("educ", "married", "re75"))
+```
+* Interpretation:
+  + x-axis display covariate values 
+  + y-axis display proportion of the sample at or less than that covariate value. 
+  + perfectly overlapping lines indicate good balance. 
+  + black line = treated, gray line = control
+  + Although `educ` and `re75` were fairly well balanced before matching, their balance has improved nonetheless. `married` appears far better balanced after matching than before. 
+  + The vertical difference between eCDF lines of each treatment group is used to compute the eCDF difference statistics 
+
+# Assessing Balance after Subclassification
+
+An additional option in `summary()` is `subclass`, which allows us to request balance for individual subclasses. `subclass` can be set to TRUE to display balance for all subclasses or the indices of individual subclasses for which balance is to be displayed. 
+
+```{r}
+# perform propensity score subclassification using 4 subclasses (typically more is beneficial)
+s.out <- matchit(treat ~ age + educ + race + married + 
+                   nodegree + re74 + re75, data = lalonde,
+                 method = "subclass", subclass = 4)
+
+s.out
+
+summary(s.out) # default is to display balance only in aggregate using the subclassification weights.
+
+summary(s.out, subclass = TRUE, un = FALSE)
+```
+
+We can plot the SMD in a Love plot that also displays balance for the subclasses 
+
+```{r}
+s <- summary(s.out, subclass = TRUE)
+plot(s, var.order = "unmatched", abs = FALSE)
+```
+
+Note that for some variables, while the groups are balanced in aggregate (black dots), the individual subclasses (gray numbers) may not be balanced, in which case unadjusted effect estimates within these subclasses should not be interpreted as unbiased.
+
+# Assessing Balance with `cobalt`
+
+## `bal.tab()` - similar to `summary()`
+
+`bal.tab()` produces table of balance statistics
+
+```{r}
+bal.tab(m.out, un = TRUE, stats = c("m", "v", "ks"))
+
+```
+
+By setting stats argument = m, v, ks we requested mean differences, variance ratio, and Kolmogorov-Smirnov statistics. \
+
+`bal.tab()` can also produce balance on several objects => comparing balance across several matching specifications
+
+```{r}
+#Nearest neighbor (NN) matching on the PS
+m.out2 <- matchit(treat ~ age + educ + race + married + 
+                   nodegree + re74 + re75, data = lalonde)
+
+#Balance on covariates after full and NN matching
+bal.tab(treat ~ age + educ + race + married + 
+          nodegree + re74 + re75, data = lalonde, 
+        un = TRUE, weights = list(full = m.out, nn = m.out2))
+```
+
+
+Here we can see that balance is comparable between the two matching methods, but full matching balances age better and yields a slightly higher effective sample size.
+
+
+
+
+## `love.plot` - similar to `plot.summary.matchit()`
+
+```{r}
+love.plot(m.out, binary = "std")
+
+```
+
+
+Below we demonstrate a more advanced use that customizes the appearance of the plot and displays balance not only on mean differences but also on Kolmogorov-Smirnov statistics and for both full matching and nearest neighbor matching simultaneously.
+
+
+```{r}
+love.plot(m.out, stats = c("m", "ks"), poly = 2, abs = TRUE,
+          weights = list( nn = m.out2),
+          drop.distance = TRUE, thresholds = c(m = .1),
+          var.order = "unadjusted", binary = "std",
+          shapes = c("triangle", "square", "circle"), 
+          colors = c("blue", "darkgreen", "red"),
+          sample.names = c("Full Matching", "NN Matching", "Original"),
+          position = "bottom")
+
+```
+
+
+## `bal.plot()` - similar to `plot.matchit()`
+
+`bal.plot()` displays distributional balance for a single covariate. Its default is to display kernel density plots for continuous variable and bar graphs for categorical variables. It can also display eCDF plots and histograms
+
+```{r}
+#Density plot for continuous variables
+bal.plot(m.out, var.name = "educ", which = "both")
+```
+
+```{r}
+#Bar graph for categorical variables
+bal.plot(m.out, var.name = "race", which = "both")
+
+```
+
+```{r}
+#Mirrored histogram
+bal.plot(m.out, var.name = "distance", which = "both",
+         type = "histogram", mirror = TRUE)
+```
+
+
+# Conclusion

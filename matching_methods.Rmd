@@ -1,0 +1,141 @@
+---
+title: "Matching Methods"
+author: "Linh Tran"
+date: "5/19/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(MatchIt)
+library(optmatch)
+library(tidyverse)
+library("cobalt")
+```
+
+# Introduction
+
+The choice of matching method depnds on the goals of the analysis (e.g., the estimand, whether low bias or high precision is important) and the unique qualities of each dataset to be analyzed, so there is no single optimal choice of matching method for any given analysis. \
+
+A benefit of nonparametric preprocessing through matching is that a number of matching methods can be tried and their quality assessed without consulting the outcome, reducing the possibility of capitalizing on chance while allowing for the benefits of an exploratory analysis in the design phase. 
+
+# Matching
+
+Matching is a form of *subset selection*, that is, the pruning and weighting of units to arrive at a (weighted) subset of the units from the original dataset. Ideally, and if done successfully, subset selection produces a new sample where the treatment is unassociated with the covariates so that a comparison of the outcomes treatment and control groups is not confounded by the measured and balanced covariates. Fitting regression models in matched samples reduces the dependence of the validity of the estimated treatment effect on the correction specification of the model. \
+
+Matching is nonparametric in the sense that the estimated weights and pruning of the samples are not direct functions of estimated model parameters, which is in contrast to propensity score weighting (inverse probability weighting), where the weights come more directly from the estimated propensity score model and therefore more sensitive to its correct specification. \
+
+This is different from *matching imputation*, where missing potential outcomes for each unit are imputed using the observed outcomes of paired units. \
+
+* `MatchIt` has 2 classes of methods: distance matching and stratum matching. 
+  + **Distance matching**: considering treated group and selecting members of the control group to pair with each member of the treated group based on the distance between units. Including: nearest neighbor, optimal pair, optimal full, genetic matching. Typucally can only estimate average treatment effect in the treated (ATT)
+  + **stratum matching**: stratify, any units that are in strata that lack either treated or control units are then dropped from the sample. Strata can be formed using raw covariates (exact), coersened version of the covariates (cem), or coarsened versions of the propensity score (subclass). For use in estimating marginal treatment effects after exact matching, stratification weights are computed for the matched units first by computing a new "stratum propensity score" for each unit, which is the proportion of treated units in its stratum. The formulas for computing inverse probability weights from standard propensity scores are then applied to the new stratum propensity scores to form the new weights. 
+  
+
+
+# Matching Methods
+
+## Nearest Neighbor Matching (`method = "nearest"`) or greedy matching
+
+It is greedy in the sense that each pairing occurs without reference to how other units will be or have been paired => does not aim to optimize any criterion. \
+
+NN matching requires the specification of a distance measure to define which control unit is closest to each treated unit. The most common distance is the *propensity score difference*, which is the difference between the propensity scores of each treated and control unit. Another popular distance is the Mahalanobis distance.\
+
+The order in which the treated units are to be paired must also be specified and has the potential to change the quality of the matches, this is specified by the `m.order` argument. With propensity score matching, the default is to go in descending order from the highest propensity score, doing so allows the units that would have the hardest time finding close matches to be matched first. *Random ordering* where matching can be tried multiple times until an adequate matched sample is found. When matching with replacement, the matching order doesn't mater. 
+
+## Optimal Pair Matching (`method = "optimal"`)
+
+Similar to NN matching in that it pairs each treated unit with 1 or more control units. Unlike NN, however, it is "optimal" rather than greedy in the sense that it attempts to choose matches that collectively optimize an overall criterion (mean of absolute pair distance in the matched sample). Optimal pair matching and NN often yield the same or very similar matched samples. 
+
+## Optimal Full Matching (`method = "full"`)
+
+Optimal full matching assigns every treated and control unit in the sample to one subclass each. Each subclass contains one treated unit and one or more control units or one control units and one or more treated units. It is optimal in the sense that the chosen number of subclasses and the assignment of units to subclasses minimize the mean of the absolute within-subclass distances in the matched sample. \
+
+Although full matching uses all available units, there is a loss in precision due to the weights. Units may be weighted in such a way that they contribute less to the sample than would unweighted units, so the effective sample size of the full matching weighted sample may be lower than even that of 1:1 pair matching. Balance is often far better after full matching than it is with 1:k matching, making full matching a good option to consider especially when 1:k matching is not effective or when ATE is the target estimand. \
+
+The specification of the full matching optimization can be customized by supplying additional arguments that are passed to `optmatch::fullmatch()`. The numerical tolerance value can be set much lower than default e.g. `tol = 1e-7`
+
+
+## Genetic Matching (`method = "genetic"`)
+
+see `?method_genetic()`. 
+
+## Exact Matching (`method = "exact"`)
+
+Exact matching is a form of stratum matching that involves creating subclasses based on unique combinations of covariate values and assigning each unit into their corresponding subclass so that only units with identical covariate values are placed into the same subclass. Any units that are in subclasses lacking either treated or control units will be dropped. \
+
+Exact matching is the most powerful  method in that no assumptions are required on either treatment or outcome model for the method to remove confounding due to the measured covariates; the covariate distributions are exactly balanced. \
+
+The problem with exact matching is that few if any units will remain after matching, so the estimated effect will only generalize to a very limited population and can lack precision. It is particularly ineffective with continuous covariates, for which it might be that no 2 units have the same value, and with many covariates, for which it might be the cases that no 2 units have the same combination of all covariates. 
+
+
+
+## Coarsened Exact Matching (`method = "cem"`)
+
+Coarsened exact matching (CEM) is a form of stratum matching that involves first coarsening the covariates by creating bins and then performing exact matching on the new coarsened versions of the covariates. The degree and method of coarsening can be controlled by the user to manage the trade-off between exact and approximate balancing. For example, coarsening a covariate to two bins will mean that units that differ greatly on the covariate might be placed into the same subclass, while coarsening a variable to five bins may require units to be dropped due to not finding matche
+
+## Subclassification (`method = "subclass"`)
+
+Propensity score subclassification can be thought of as a form of coarsened exact matching with the propensity score as the sole covariate to be coarsened and matched on.\
+
+The output of propensity score subclassification includes the assigned subclasses and the subclassification weights. Effects can be estimated either within each subclass and then averaged across them, or a single marginal effect can be estimated using the subclassification weights. 
+
+
+# Customizing the Matching Specification
+
+The output of propensity score subclassification includes the assigned subclasses and the subclassification weights. Effects can be estimated either within each subclass and then averaged across them, or a single marginal effect can be estimated using the subclassification weights. 
+
+## Specifying the propensity score or other distance measure (`distance`)
+
+The distance measure is used to define how close 2 units are. By default, the distance measure = propensity score difference, and the argument supplied to `distance` corresponds to the method of estimating the propensity score. \
+
+The default `distance` argument is `glm`, which estimates propensity scores using logistic regression or another GLM. 
+
+## Implementing common suppiort restrictions (`discard`)
+
+The region of *common support* is the region of overlap between treatment groups. A common support restriction discards uits that fall outsie of the region of common support, preventing them from being matched to other units and included in the matched sample. The argument can be supplied as `treated`, `control`, or `both`, which discards units in the corresponding group that fall outside the region of common support for the propensity score. \
+
+If units from the treated group are discarded based on a common support restriction, the estimand no longer corresponds to the ATT. 
+
+## Caliper matching (`caliper`)
+
+Calipers ensure paired units are close to each other on the calipered covariates, which can ensure good balance in the matched sample. Multiple variables can be supplied to `caliper` to enforce calipers on all of them simultaneously.\
+
+If units from the treated group are left unmatched due to a caliper, the estimand no longer corresponds to the ATT.
+
+## Mahalanobis distance matching (`mahvars`)
+
+
+## Exact matching (`exact`)
+
+## Matching with replacement (`replace`)
+
+NN and genetic matching have the option of matching with or without replacement, which controlled by the `replace` argument. Matching with replacement means that control units can be reused and matched to multiple treated units. \
+
+Matching without replacement carries certain statistical benefits in that weights for each unit can be omitted or are more straightforward to include and dependence between units depends only on pair membership. \
+
+Matching with replacement tend to yield better balance though, because it avoid "running out" of close control units to match to treated units, though the reuse of control units will decrease the effect sample size, there by worsening precision. \
+
+After matching with replacement, control units are assigned to more than one subclass, so the `get_matches()` function should be used instead of `match.data()`after matching with replacement if subclasses are to be used in follow-up analyses. 
+
+## k:1 matching (`ratio`)
+ 
+To perform k:1 matching which pairs (up to) k control units with each treated unit, the `ratio` argument can be specified. \
+
+k:1 matching can preserve precision by preventing too many contorl units from being unmatched and dropped from the matched sample, though the gain in precision by increasing k diminishes rapidly after 4. \
+
+For k > 1, the matches after the first match will generally be worse than the first match in terms of closeness to the treated unit, so increasing k can also worsen balance. 
+
+# Choosing a Matching Method
+
+Multiple methods should be tried as long as the treatment effect is not estimated until a method has been settled on.
+
+Typical workflow: try a matching method, and if it yields poor balance or an unacceptably low remaining sample size, try another, until a satisfactory specification has been found. It is important to assess balance broadly (i.e. beyond comparing the means of the covariate sin the treated and control groups), and the search for a matching specification should not stop when a threshold is reached, but should attempt to come as close as possible to perfect balance. \
+
+If the target of inference is ATE, full matching and subclassification can be used. If the target of inference is ATT or ATC, any matching method can be used. \
+
+Because exact and coarsened exact matching aim to balance the entire joint distribution of covariates, they are the most powerful methods. \
+
+Optimal pair matching and nearest neighbor matching without replacement tend to perform similarly to each other; nearest neighbor matching may be preferable for large datasets that cannot be handled by optimal matching. Nearest neighbor matching with replacement, full matching, and subclassification all involve weighting the control units with nonuniform weights, which often allows for improved balancing capabilities but can be accompanied by a loss in effective sample size, even when all units are retained.
+
+
+# Reporting the Matching Specification
